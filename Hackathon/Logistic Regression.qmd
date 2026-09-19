@@ -1,0 +1,94 @@
+---
+title: "Logistic Regression"
+author: "Patrick Torralba"
+format: 
+  html:
+    theme: flatly
+    fontsize: 0.8em
+    code-fold: FALSE
+    code-tools: TRUE
+    code-copy: TRUE
+    toc: TRUE
+    toc-depth: 4
+    smooth-scroll: TRUE
+    embed-resources: TRUE
+    fig-align: center
+editor: visual
+---
+
+# Step 1
+
+```{r}
+#| label: library
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+library(tidyverse)
+
+```
+
+```{r}
+#| label: import-data
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+stroke <- read_csv("stroke.csv")
+```
+
+# Step 2
+
+Logistic Regression Modeling
+
+```{r}
+#| label: log-regress
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+stroke_model <- glm(
+  data = stroke,
+  family = binomial,
+  stroke ~ gender + age + heart_disease + bmi 
+)
+
+summary(stroke_model)
+
+exp(coef(stroke_model))
+exp(confint(stroke_model))
+
+
+```
+
+# Step 3
+
+Predict stroke probability for each individual
+
+```{r}
+#| label: stroke-predict
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+
+stroke$prob <- predict(stroke_model, type = "response")
+
+```
+
+# Step 4
+
+Produce a plot
+
+```{r}
+#| label: stroke-plot
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+ggplot(stroke, aes(x = prob)) +
+  geom_histogram() +
+  labs(x = "Predicted Probability of a Stroke")
+
+
+```

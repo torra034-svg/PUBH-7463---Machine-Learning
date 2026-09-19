@@ -1,0 +1,292 @@
+---
+title: "Assignment 2 - Patrick Torralba"
+author: "Patrick Torralba"
+format: 
+  html:
+    theme: flatly
+    fontsize: 0.8em
+    code-fold: FALSE
+    code-tools: TRUE
+    code-copy: TRUE
+    toc: TRUE
+    toc-depth: 4
+    smooth-scroll: TRUE
+    embed-resources: TRUE
+    fig-align: center
+editor: visual
+---
+
+# Preliminary
+
+```{r}
+#| label: import-library
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+library(tidyverse)
+
+stroke <- read_csv("stroke.csv")
+
+```
+
+# Question 1
+
+Define the models
+
+```{r}
+#| label: models
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+model1 <- glm(
+  data = stroke,
+  family = binomial,
+  stroke ~ heart_disease + hypertension + smoking_status
+)
+
+model2 <- glm(
+  data = stroke,
+  family = binomial,
+  stroke ~ heart_disease + hypertension + smoking_status + age + avg_glucose_level + bmi
+)
+
+```
+
+Use the models to obtain probabilities
+
+```{r}
+#| label: probability
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+stroke <- stroke |> 
+  mutate(
+    prob1 = predict(model1, type = "response"),
+    prob2 = predict(model2, type = "response"),
+    ## I also clean the data for future purposes
+    stroke1 = case_when( 
+      stroke == 1 ~ "Stroke",
+      stroke == 0 ~ "No Stroke",
+      .default = NA)
+  )
+
+```
+
+Plots
+
+```{r}
+#| label: plots
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+## Model 1 Plot
+ggplot(stroke, aes(x = prob1, fill = stroke1)) +
+  geom_density(alpha = 0.5) +
+  labs(
+    x = "prob_stroke",
+    fill = "obs_stroke"
+  )
+
+## Model 2 Plot
+ggplot(stroke, aes(x = prob2, fill = stroke1)) +
+  geom_density(alpha = 0.5) +
+  labs(
+    x = "prob_stroke",
+    fill = "obs_stroke"
+  )
+```
+
+Table
+
+```{r}
+#| label: table-model
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+library(kableExtra)
+
+stroke_table <- stroke |>
+  pivot_longer(
+    cols = c(prob1, prob2),
+    names_to = "Model",
+    values_to = "prob_stroke"
+  ) |> 
+  mutate(
+    Model = case_when(
+      Model == "prob1" ~ "Model 1",
+      Model == "prob2" ~ "Model 2",
+      .default = NA)
+  )|> 
+  group_by(Model, stroke1) |> 
+  summarize(
+    "Mean prediction" = mean(prob_stroke),
+    "Median prediction" = median(prob_stroke),
+    "SD prediction" = sd(prob_stroke),
+    .groups = "drop"
+  ) |> 
+  rename(`Stroke Observed?` = stroke1)
+
+
+kable(stroke_table)
+
+```
+
+## Answer 1
+**It appears that Model 2 is more accurate than Model 1 in terms of predicting stroke outcome. In the summary table, when we look at the median prediction values Model 2 has larger median prediction values than Model 1 for stroke cases only (0.13 vs 0.04, respectively).**
+
+**And, when we look at the density plots, Model 1 has both stroke and no stroke distributions closely overlapping close to zero in contrast to the Model 2 density graph. Therefore, this means that Model 1 is less able to discriminate between stroke outcomes in contrast to Model 2.**
+
+# Question 2
+
+This model includes all covariates except for id and stroke
+
+```{r}
+#| label: model-3
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+model3 <- glm(
+  data = stroke,
+  family = binomial,
+  stroke ~ gender + age + hypertension + heart_disease + ever_married + work_type + Residence_type + avg_glucose_level + bmi + smoking_status + stroke
+)
+
+stroke_q2 <- stroke |> 
+  mutate(
+    prob3 = predict(model3, type = "response")
+  )
+
+
+```
+
+Model 3 plot
+
+```{r}
+#| label: model-3-plot
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+
+## Model 3 Plot
+ggplot(stroke_q2, aes(x = prob3, fill = stroke1)) +
+  geom_density(alpha = 0.5) +
+  labs(
+    x = "prob_stroke",
+    fill = "obs_stroke"
+  )
+
+```
+
+Model 3 Table
+
+```{r}
+#| label: table-model-3
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+stroke_table_q2 <- stroke_q2 |>
+  pivot_longer(
+    cols = c(prob1, prob2, prob3),
+    names_to = "Model",
+    values_to = "prob_stroke"
+  ) |> 
+  mutate(
+    Model = case_when(
+      Model == "prob1" ~ "Model 1",
+      Model == "prob2" ~ "Model 2",
+      Model == "prob3" ~ "Model 3",
+      .default = NA)
+  )|> 
+  group_by(Model, stroke1) |> 
+  summarize(
+    "Mean prediction" = mean(prob_stroke),
+    "Median prediction" = median(prob_stroke),
+    "SD prediction" = sd(prob_stroke),
+    .groups = "drop"
+  ) |> 
+  rename(`Stroke Observed?` = stroke1)
+
+
+kable(stroke_table_q2)
+```
+
+## Answer 2
+
+**No, adding more variables does not appear to improve stroke prediction. Model 3 does have a slightly higher mean prediction (0.14 vs 0.13), but Model 3 also has a lower median stroke prediction value (0.12 vs 0.13, respectively).**
+
+**Likewise, when we compare the density graphs, both Model 3 and Model 2 plots look extremely identical.**
+
+**Therefore, the table and graph mean that adding more variables do not improve stroke prediction outcome. Although the differences between Model 3 and Model 2 appear minimal..**
+
+
+# Question 3
+```{r}
+#| label: 50-age-comparison
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+stroke_q3 <- stroke_q2 |> 
+  mutate(
+    Age = case_when(
+      age > 50 ~ "Age > 50",
+      .default = "Age <= 50"
+    )
+  )
+
+```
+
+Plot
+```{r}
+#| label: q3-plot
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+ggplot(stroke_q3, aes(x = prob3, fill = stroke1)) +
+  geom_density(alpha = 0.5) +
+  facet_wrap(~ Age) +
+  labs(
+    x = "prob_stroke",
+    fill = "obs_stroke"
+  )
+
+
+```
+
+
+Table
+```{r}
+#| label: q3-table
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+stroke_table_q3 <- stroke_q3 |>
+  group_by(Age, stroke1) |> 
+  select(-prob1, -prob2) |> 
+  summarize(
+    "Mean prediction" = mean(prob3),
+    "Median prediction" = median(prob3),
+    "SD prediction" = sd(prob3),
+    .groups = "drop"
+  ) |> 
+  rename(`Stroke Observed?` = stroke1)
+
+
+kable(stroke_table_q3)
+
+```
+
+## Answer 3
+**It appears that Model 3 is better at predicting stroke for older individuals because when we look at the Age > 50 plot, there isn't as much overlap in contrast to Age <= 50 denisty plot. This means that Model 3 is better able to discriminate stroke outcomes for older individuals. **
+
+**Also when we look at the summary table, we see that **
