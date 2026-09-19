@@ -137,6 +137,7 @@ kable(stroke_table)
 ```
 
 ## Answer 1
+
 **It appears that Model 2 is more accurate than Model 1 in terms of predicting stroke outcome. In the summary table, when we look at the median prediction values Model 2 has larger median prediction values than Model 1 for stroke cases only (0.13 vs 0.04, respectively).**
 
 **And, when we look at the density plots, Model 1 has both stroke and no stroke distributions closely overlapping close to zero in contrast to the Model 2 density graph. Therefore, this means that Model 1 is less able to discriminate between stroke outcomes in contrast to Model 2.**
@@ -226,8 +227,8 @@ kable(stroke_table_q2)
 
 **Therefore, the table and graph mean that adding more variables do not improve stroke prediction outcome. Although the differences between Model 3 and Model 2 appear minimal..**
 
-
 # Question 3
+
 ```{r}
 #| label: 50-age-comparison
 #| message: FALSE
@@ -245,6 +246,7 @@ stroke_q3 <- stroke_q2 |>
 ```
 
 Plot
+
 ```{r}
 #| label: q3-plot
 #| message: FALSE
@@ -262,8 +264,8 @@ ggplot(stroke_q3, aes(x = prob3, fill = stroke1)) +
 
 ```
 
-
 Table
+
 ```{r}
 #| label: q3-table
 #| message: FALSE
@@ -287,6 +289,152 @@ kable(stroke_table_q3)
 ```
 
 ## Answer 3
-**It appears that Model 3 is better at predicting stroke for older individuals because when we look at the Age > 50 plot, there isn't as much overlap in contrast to Age <= 50 denisty plot. This means that Model 3 is better able to discriminate stroke outcomes for older individuals. **
 
-**Also when we look at the summary table, we see that **
+**It appears that Model 3 is better at predicting stroke for older individuals because when we look at the Age \> 50 plot, there isn't as much overlap in contrast to Age \<= 50 density plot. This means that Model 3 is better able to discriminate stroke outcomes for older individuals.**
+
+**Also when we look at the summary table, younger people with strokes have both a mean and median prediction values significantly lower their older people counterparts (0.02 and 0.02 vs 0.15 and 0.14, respectively).**
+
+# Question 4
+
+```{r}
+#| label: cutpoints
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+cutpoints <- c(11, 21, 31, 41, 51)
+
+q4 <- map_dfr(cutpoints, ~ tibble(
+  `Cutpoint` = .x,
+  `Age Group` = c(
+    str_c(.x, ">"),
+    str_c("<=",.x)),
+  `N in group` = c(
+    sum(stroke$age > .x), 
+    sum(stroke$age <= .x)),
+  `Prob of stroke` = c(
+    mean(stroke$stroke[stroke$age > .x], na.rm = TRUE),
+    mean(stroke$stroke[stroke$age <= .x], na.rm = TRUE)
+  )
+))
+
+kable(q4)
+
+diff_summary <- q4 |> 
+  group_by(Cutpoint) |> 
+  summarize(
+    Prob_Greater = `Prob of stroke`[1],  # 1st row is >
+    Prob_Less    = `Prob of stroke`[2],  # 2nd row is <=
+    Difference   = abs(Prob_Greater - Prob_Less),
+    .groups = "drop"
+  ) |> 
+  arrange(desc(Difference))
+
+kable(diff_summary)
+
+```
+
+## Answer 4
+
+**The largest difference in stroke probability between partitions is the equal or over age 51 group.**
+
+**Specifically, \>= 51 group has a stroke difference of probability of 0.09**
+
+# Question 5
+
+```{r}
+#| label: decision-tree
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+library(rpart)
+library(rpart.plot)
+
+stroke_tree <- rpart(stroke ~ gender + age + hypertension + heart_disease + ever_married + work_type + Residence_type + avg_glucose_level + bmi + smoking_status, data = stroke)
+
+rpart.plot(stroke_tree)
+
+
+pred_stroke <- predict(stroke_tree)
+
+unique(pred_stroke)
+
+```
+
+Plot
+
+```{r}
+#| label: decision-tree-plot
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+stroke_q5 <- stroke |> 
+  mutate(
+    Age = case_when(
+      age < 68 ~ "Age < 68",
+      .default = "Age >= 68"),
+    prob5 = predict(stroke_tree)
+  )
+
+ggplot(stroke_q3, aes(x = prob3, fill = stroke1)) +
+  geom_density(alpha = 0.5) +
+  facet_wrap(~ Age) +
+  labs(
+    x = "prob_stroke",
+    fill = "obs_stroke",
+    title = "Model 3"
+  )
+
+ggplot(stroke_q5, aes(x = prob5, fill = stroke1)) +
+  geom_density(alpha = 0.5) +
+  facet_wrap(~ Age) +
+  labs(
+    x = "prob_stroke",
+    fill = "obs_stroke",
+    title = "Decision Tree"
+  )
+
+
+```
+
+Table
+
+```{r}
+#| label: decision-tree-table
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+
+stroke_table_q5 <- stroke_q5 |>
+  group_by(Age, stroke1) |> 
+  select(-prob1, -prob2) |> 
+  summarize(
+    "Mean prediction" = mean(prob5),
+    "Median prediction" = median(prob5),
+    "SD prediction" = sd(prob5),
+    .groups = "drop"
+  ) |> 
+  rename(`Stroke Observed?` = stroke1)
+
+
+kable(stroke_table_q3, caption = "Model 3")
+kable(stroke_table_q5, caption = "Decision Tree")
+
+
+
+```
+
+## Answer 5
+
+**The root node is the condition if the individual is below 68 years old. The two leaf nodes are if the person is over or equal age 68 with a predicted stroke probability of 2% representing 84% of the dataset or if the person is below age 68 with a predicted stroke probability of 16% representing 16% of the dataset.**
+
+**There are only two unique values for the decision tree because these two values represent probabilities of developing a stroke under the condition that the individual is over or under the age of 68. Essentially, we do not have any more unique values because we do not have any more leaf nodes.**
+
+**The decision tree isn't any more accurate in predicting stroke in contrast to the logistic regression model. When we compare the median stroke prediction values between Model 3 and the decision tree for older individuals we get 0.13 and 0.16, respectively; for younger individuals we get median stroke prediction values of 0.02 and 0.02, respectively. Essentially, these values tell us that both models are very similar in predicting stroke outcome.**
+
+**And, when we compare density plots, both plots appear similar with younger individuals highly overlapping and older individuals being more distinguishable. However, the decision tree plot has stroke probabilities that are much closer to zero. Another difference is that for older individuals, the stroke probabilities have higher overlap.**
+
+**Therefore, Model 3 is more accurate in predicting stroke in comparison to the decision tree model because the density plot model for older individuals have less overlap. In other words, lesser overlap means the model is better able to distinguish between stroke or no stroke outcome.**
