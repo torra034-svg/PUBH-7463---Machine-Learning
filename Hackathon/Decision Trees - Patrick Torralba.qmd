@@ -1,0 +1,152 @@
+---
+title: "Decision Trees - Patrick Torralba"
+author: "Patrick Torralba"
+format: 
+  html:
+    theme: flatly
+    fontsize: 0.8em
+    code-fold: FALSE
+    code-tools: TRUE
+    code-copy: TRUE
+    toc: TRUE
+    toc-depth: 4
+    smooth-scroll: TRUE
+    embed-resources: TRUE
+    fig-align: center
+editor: visual
+---
+
+# Preliminary
+```{r}
+#| label: load-library
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+library(tidyverse)
+
+```
+
+
+# Step 1
+```{r}
+#| label: 
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+stroke <- read_csv("stroke.csv") |> 
+  mutate(stroke = as_factor(stroke))
+
+```
+
+
+# Step 2
+```{r}
+#| label: decision-tree
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+## Load the necessary libraries
+library(rpart)
+library(rpart.plot)
+
+## Fit the decision tree
+dec_tree <- rpart(stroke ~ age + gender, data = stroke)
+
+rpart.plot(dec_tree)
+
+summary(dec_tree)
+
+```
+
+```{r}
+#| label: decision-tree-2
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+dec_tree_v2 <- rpart(
+  data = stroke,
+  stroke ~ age + gender + hypertension + heart_disease + bmi + smoking_status
+)
+
+rpart.plot(dec_tree_v2)
+
+summary(dec_tree_v2)
+
+```
+
+No, we do not get more splits when we add more variables to the decision tree model.
+
+# Step 3
+```{r}
+#| label: r-part
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+?rpart.control()
+```
+
+# Step 4
+```{r}
+#| label: cp-adjust
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+RP_v1 <- rpart.control(cp = 0.0003) # Set the control parameters
+
+dec_tree_v1 <- rpart(stroke ~ age + gender + hypertension + heart_disease + bmi + smoking_status, 
+                     data = stroke,
+                     control = RP_v1) # Pass the control parameters to the tree
+
+rpart.plot(dec_tree_v1)
+
+```
+
+# Step 5
+```{r}
+#| label: dec-tree-3
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+
+summary(dec_tree_v1)
+
+RP_v2 <- rpart.control(cp = 0.001, 
+                       maxdepth = 5)
+
+dec_tree_v2 <- rpart(stroke ~ age + gender + hypertension + heart_disease + bmi + smoking_status, 
+                     data = stroke,
+                     control = RP_v2) # Pass the control parameters to the tree
+
+rpart.plot(dec_tree_v2)
+
+summary(dec_tree_v2)
+```
+
+Compared to the step 4 plot, this tree has significantly less leaf nodes and only has a maximum depth of 5 layers. 
+# Step 6
+```{r}
+#| label: AUC-calculation
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+library(pROC)
+
+## Get predictions from the "v1" decision tree
+preds_v1 <- as.vector(predict(dec_tree_v1, stroke, type = "prob")[,2])
+
+## Compute the ROC curve
+roc_v1 <- roc(stroke$stroke, preds_v1)
+
+## Plot the ROC curve
+plot(roc_v1)
+
+```
+
