@@ -1,0 +1,58 @@
+---
+title: "Assignment 4 - Patrick Torralba"
+author: "Patrick Torralba"
+format: 
+  html:
+    theme: flatly
+    fontsize: 0.8em
+    code-fold: FALSE
+    code-tools: TRUE
+    code-copy: TRUE
+    toc: TRUE
+    toc-depth: 4
+    smooth-scroll: TRUE
+    embed-resources: TRUE
+    fig-align: center
+editor: visual
+
+---
+
+# Preliminary
+```{r}
+#| label: library
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE 
+
+library(tidyverse) #clean data
+library(tidymodels)
+
+atus <- read_csv("atus.csv")
+```
+
+# Before you begin
+
+**I am selecting SCHAPPY as my outcome**
+
+```{r}
+#| label: split-data
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE 
+
+set.seed(888)
+
+atus_split <- initial_split(
+  atus,
+  prop = 0.70,
+  strata = SCHAPPY
+)
+
+atus_train <- training(atus_split)
+
+atus_test <- testing(atus_split)
+
+```
+
+# Question 1
+I am using the following covariates to 

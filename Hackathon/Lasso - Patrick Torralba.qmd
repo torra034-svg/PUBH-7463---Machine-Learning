@@ -1,0 +1,317 @@
+---
+title: "Lasso - Patrick Torralba"
+author: "Patrick Torralba"
+format: 
+  html:
+    theme: flatly
+    fontsize: 0.8em
+    code-fold: FALSE
+    code-tools: TRUE
+    code-copy: TRUE
+    toc: TRUE
+    toc-depth: 4
+    smooth-scroll: TRUE
+    embed-resources: TRUE
+    fig-align: center
+editor: visual
+
+
+---
+
+# Prelimninary
+
+# Step 1
+```{r}
+#| label: import 
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+library(tidyverse)
+library(tidymodels)
+
+nhis <- read_csv("nhis_flu_train_21_22.csv") |> 
+  select(-c(HHX, SRVY_YR, AFNOW, PREGNOW_A, CVDDIAG_A)) %>%
+  filter(PHSTAT_A != "Unknown") %>%
+  mutate(across(-c(AGEP_A, PCNT18UPTC, PCNTLT18TC), as.factor),
+         HEALTH = factor(PHSTAT_A, 
+                         levels = c("Poor", "Fair", "Good", "Very Good", "Excellent")) %>% as.integer) %>%
+  select(-PHSTAT_A) %>%
+  drop_na()
+
+nhis_test <- read_csv("nhis_flu_test_23.csv") |> 
+  select(-c(HHX, SRVY_YR, AFNOW, PREGNOW_A, CVDDIAG_A)) %>%
+  filter(PHSTAT_A != "Unknown") %>%
+  mutate(across(-c(AGEP_A, PCNT18UPTC, PCNTLT18TC), as.factor),
+         HEALTH = factor(PHSTAT_A, 
+                         levels = c("Poor", "Fair", "Good", "Very Good", "Excellent")) %>% as.integer) %>%
+  select(-PHSTAT_A) %>%
+  drop_na()
+
+```
+
+
+# Step 2: Linear Regression
+```{r}
+#| label: linear-model-predictions
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+LM <- lm(HEALTH ~., data = nhis)
+
+## Calculate predictions
+preds_LM <- predict(LM, newdata = nhis_test)
+
+nhis_test <- nhis_test |> 
+  mutate(HEALTH_pred = preds_LM)
+
+```
+
+```{r}
+#| label: histogram-actual
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+ggplot(nhis_test, aes(x = HEALTH)) + 
+  geom_histogram()
+
+```
+
+
+
+```{r}
+#| label: histogram-prediction
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+ggplot(nhis_test, aes(x = HEALTH_pred)) +
+  geom_histogram()
+
+```
+
+# Step 3: Fitting the Lasso
+```{r}
+#| label: glmnet
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+library(glmnet)
+
+Y <- LM$model$HEALTH
+X <- model.matrix(LM)
+## Equivalent to: X <- model.matrix(HEALTH ~ ., data = nhis)
+
+
+## Trying different lambda values
+lasso <- glmnet(X, Y, lambda = 1)
+lasso <- glmnet(X, Y, lambda = 0.1)
+lasso <- glmnet(X, Y, lambda = 0.01)
+
+## Calculate for 100 lambda values (by default)
+lasso <- glmnet(X, Y)
+
+```
+
+# Step 4: Exploring the lasso
+```{r}
+#| label: traceplot
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+tidy_lasso <- lasso %>% tidy()
+
+tidy_lasso %>%
+  filter(term != "(Intercept)") %>%
+  ggplot(aes(x = lambda, y = estimate, color = term)) +
+  geom_line() +
+  geom_hline(yintercept = 0) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom")
+
+```
+
+# Step 5: Choosing lambda
+```{r}
+#| label: predict-lasso
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+test_X <- model.matrix(HEALTH~., data = nhis_test %>% select(-HEALTH_pred))
+
+# Predictions for lambda = 0.2
+preds_lasso_1 <- predict(lasso, newx = test_X, s = 0.2)
+coefs_lasso_1 <- coef(lasso, newX = test_X, s = 0.2)
+
+# Predictions for lambda = 0.01
+preds_lasso_2 <- predict(lasso, newx = test_X, s = 0.01)
+coefs_lasso_2 <- coef(lasso, newX = test_X, s = 0.01)
+
+df_preds <- data.frame(preds_lasso_1, preds_lasso_2)
+df_coefs <- data.frame(term = rownames(coefs_lasso_1), 
+                       lasso_1 = as.vector(coefs_lasso_1), 
+                       lasso_2 = as.vector(coefs_lasso_2))
+
+library(knitr) # To enable the kable command
+
+df_preds %>% slice(1:10) %>% 
+  kable(col.names = c("Pred, Lambda = 0.2", "Pred, Lambda = 0.01"))
+
+df_coefs %>% arrange(desc(abs(lasso_2))) %>% slice(1:10) %>% 
+  kable(col.names = c("Term", "Coef, Lambda = 0.2", "Coef, Lambda = 0.01"))
+
+```
+
+```{r}
+#| label: cross-validation
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+lasso_cv <- cv.glmnet(X, Y)
+```
+
+```{r}
+#| label: MSE-vs-lambda
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+
+plot(lasso_cv)
+```
+
+```{r}
+#| label: final-prediction
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+preds_lasso <- predict(lasso, newx = test_X, s = lasso_cv$lambda.min)
+```
+
+```{r}
+#| label: compare-rmse
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+nhis_test %>% 
+  mutate(HEALTH_lasso = preds_lasso) %>%
+  summarise(rmse_LM = sqrt(mean((HEALTH_pred - HEALTH)^2)),
+            rmse_lasso = sqrt(mean((HEALTH_lasso - HEALTH)^2)))
+
+```
+
+# Step 6: Showing the value of the Lasso
+```{r}
+#| label: Lasso
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+
+nhis_small <- nhis %>% slice_sample(n = 250)
+
+LM_small <- lm(HEALTH ~ ., data = nhis_small)
+LM_test <- lm(HEALTH ~ ., data = nhis_test %>% select(-HEALTH_pred))
+
+train_namevals <- colnames(model.matrix(LM_small))
+test_namevals <- colnames(model.matrix(HEALTH~., data = nhis_test))
+common_namevals <- intersect(train_namevals, test_namevals)
+
+X_small_train <- model.matrix(LM_small)[, common_namevals]
+X_small_test <- model.matrix(LM_test)[, common_namevals]
+
+Y_small_train <- LM_small$model$HEALTH
+Y_small_test <- LM_test$model$HEALTH
+```
+
+```{r}
+#| label: lasso-lm
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+## Fit the linear regression and obtain predictions "manually"
+LM_small <- lm.fit(X_small_train, Y_small_train)
+coefs <- LM_small$coefficients
+coefs_missing <- which(is.na(LM_small$coefficients))
+preds_LM_small <- X_small_test[, -coefs_missing] %*% coefs[-coefs_missing]
+
+## Fit the lasso
+lasso_small <- glmnet(X_small_train, Y_small_train)
+
+```
+
+```{r}
+#| label: lasso-cross-validation
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+lasso_cv <- cv.glmnet(X_small_train, Y_small_train)
+plot(lasso_cv)
+
+```
+
+```{r}
+#| label: lasso-min
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+preds_lasso_small <- predict(lasso_small, newx = X_small_test, s = lasso_cv$lambda.min)
+```
+
+```{r}
+#| label: lasso-success
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+eval_df <- data.frame(true = Y_small_test,
+                      LM = preds_LM_small,
+                      Lasso = as.vector(preds_lasso_small)) %>%
+  summarise(`RMSE (LM)` = sqrt(mean((LM - true)^2)),
+            `RMSE (Lasso)` = sqrt(mean((Lasso - true)^2)))
+
+eval_df %>% kable()
+
+```
+
+```{r}
+#| label: lasso-compare
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+LM_coefs <- LM_small$coefficients
+lasso_coefs <- coef(lasso_small, s = lasso_cv$lambda.min)
+
+coef_df <- data.frame(term = names(LM_coefs),
+                      LM = LM_coefs,
+                      Lasso = (lasso_coefs %>% as.vector())[-2])
+
+          
+coef_df %>% pivot_longer(-term) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(term = fct_reorder(term, value, .fun = mean)) %>%
+  ggplot(aes(x = term, y = value, fill = name)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_hline(yintercept = 0, size = 1) +
+  geom_vline(xintercept = seq(0.5, 100.5, by = 1), color = gray(0.5)) +
+  coord_flip() +
+  theme_minimal() +
+  theme(panel.grid.major.y = element_blank(),
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        axis.text.y = element_text(vjust = 0.25))
+
+```
+

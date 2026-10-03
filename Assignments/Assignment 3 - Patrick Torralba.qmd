@@ -1,0 +1,250 @@
+---
+title: "Assignment 3 - Patrick Torralba"
+author: "Patrick Torralba"
+format: 
+  html:
+    theme: flatly
+    fontsize: 0.8em
+    code-fold: FALSE
+    code-tools: TRUE
+    code-copy: TRUE
+    toc: TRUE
+    toc-depth: 4
+    smooth-scroll: TRUE
+    embed-resources: TRUE
+    fig-align: center
+editor: visual
+---
+
+# Preliminary
+
+```{r}
+#| label: library
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+library(tidymodels)
+library(tidyverse)
+library(pROC)
+library(kableExtra)
+
+stroke <- read_csv("stroke.csv") |> 
+  mutate(stroke = as.factor(stroke))
+```
+
+# Question 2
+
+## Need to fix this portion
+
+**Note: this is also part of question 3**
+
+```{r}
+#| label: split-data
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+set.seed(999)
+
+
+stroke_split <-  initial_split(
+  stroke, 
+  prop = 0.70, 
+  strata = stroke)
+
+stroke_train <-  training(stroke_split)
+
+stroke_test <- testing(stroke_split)
+
+```
+
+## Define specs
+
+```{r}
+#| label: q2-define-specs
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+log_spec <- logistic_reg() |> 
+  set_engine("glm") |> 
+  set_mode("classification")
+
+tree_spec <- decision_tree(cost_complexity = 0.001, min_n = 5) |> 
+  set_engine("rpart") |> 
+  set_mode("classification")
+
+
+```
+
+## Models
+
+```{r}
+#| label: models
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+log_reg_simple <- log_spec |> 
+   fit(stroke ~ age + bmi, data = stroke)
+
+log_reg_complex <- log_spec |> 
+  fit(stroke ~ age + bmi + smoking_status + heart_disease + hypertension, data = stroke)
+
+tree_simple <- tree_spec |> 
+   fit(stroke ~ age + bmi, data = stroke)
+
+tree_complex <- tree_spec |> 
+  fit(stroke ~ age + bmi + smoking_status + heart_disease + hypertension, data = stroke)  
+
+```
+
+## Predict Probability & Calculate AUC
+
+```{r}
+#| label: AUC
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+get_auc <- function(model, data, model_name) {
+  predict(model, new_data = data, type = "prob") |>
+    bind_cols(data |> select(stroke)) |>
+    roc_auc(
+      truth = stroke,
+      .pred_1,
+      event_level = "second"
+    ) |>
+    mutate(Model = model_name)
+}
+
+
+```
+
+## Model's AUC
+
+```{r}
+#| label: auc-2
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+auc_m1 <- get_auc(log_reg_simple, stroke, "Logistic Regression (age + bmi)")
+auc_m2 <- get_auc(log_reg_complex, stroke, "Logistic Regression (Multiple Predictors)")
+auc_m3 <- get_auc(tree_simple, stroke, "Decision Tree (age + bmi)")
+auc_m4 <- get_auc(tree_complex, stroke, "Decision Tree (Multiple Predictors)")
+```
+
+## Comparison table
+
+```{r}
+#| label: comp-table
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE
+
+auc_comparison <- bind_rows(auc_m1, auc_m2, auc_m3, auc_m4) |>
+  select(Model, Metric = .metric, AUC = .estimate)
+
+kable(auc_comparison)
+
+```
+
+# Question 3
+
+## Models
+
+```{r}
+#| label: q3-models
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+log_reg_simple_train <- log_spec |> 
+  fit(stroke ~ age + bmi, data = stroke_train)
+
+log_reg_complex_train <- log_spec |> 
+  fit(
+    stroke ~ age + bmi + smoking_status + heart_disease + hypertension,
+    data = stroke_train
+  )
+
+tree_simple_train <- tree_spec |> 
+  fit(stroke ~ age + bmi, data = stroke_train)
+
+tree_complex_train <- tree_spec |> 
+  fit(
+    stroke ~ age + bmi + smoking_status + heart_disease + hypertension,
+    data = stroke_train
+  )
+
+
+predict_log_reg_simple <-  predict(log_reg_simple_train, new_data = stroke_test, type = "prob")
+
+
+predict_log_reg_complex <- predict(log_reg_complex_train, new_data = stroke_test, type = "prob")
+
+
+predict_tree_simple <-  predict(tree_simple_train, new_data = stroke_test, type = "prob")
+
+
+predict_tree_complex <-  predict(tree_complex_train, new_data = stroke_test, type = "prob")
+
+
+```
+
+## Bind predictions
+
+```{r}
+#| label: bind-predictions
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+auc_log_simple <- predict_log_reg_simple |>
+  bind_cols(stroke_test |>select(stroke)) |>
+  roc_auc(truth = stroke, .pred_1, event_level = "second") |>
+  mutate(Model = "Logistic Regression (Simple)", 
+         Evaluation = "Test Set")
+
+auc_log_complex <- predict_log_reg_complex |>
+  bind_cols(stroke_test |>select(stroke)) |>
+  roc_auc(truth = stroke, .pred_1, event_level = "second") |>
+  mutate(Model = "Logistic Regression (Complex)", 
+         Evaluation = "Test Set")
+
+auc_tree_simple <- predict_tree_simple |>
+  bind_cols(stroke_test |>select(stroke)) |>
+  roc_auc(truth = stroke, .pred_1, event_level = "second") |>
+  mutate(Model = "Decision Tree (Simple)", 
+         Evaluation = "Test Set")
+
+auc_tree_complex <- predict_tree_complex |>
+  bind_cols(stroke_test |>select(stroke)) |>
+  roc_auc(truth = stroke, .pred_1, event_level = "second") |>
+  mutate(Model = "Decision Tree (Complex)", 
+         Evaluation = "Test Set")
+```
+
+## Create AUC Comparison Table
+
+```{r}
+#| label: AUC-table-q3
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+
+auc_test_table <- bind_rows(auc_log_simple, auc_log_complex, auc_tree_simple, auc_tree_complex) |>  
+  select(Model, AUC = .estimate)
+
+kable(auc_test_table)
+
+```
+
+Overfitting in Decision Trees:
+
+The Decision Tree AUCs evaluated on the test set were lower than the AUCs calculated using the full dataset. We expect this to occur because the AUCs from the full dataset essentially "know the answer" already since the model has access to the entire dataset. Whereas, the AUCs on the test set are lower because the model has not seen the test data since it is only trained on the training data.
+
+Interestingly, the logistic regression AUC for both the full dataset and the training dataset changed less dramatically (0.8366 to 00.8317, 0.8477 to 0.841; simple and logistic regression AUC values respectively).

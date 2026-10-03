@@ -1,0 +1,193 @@
+---
+title: "Overfitting - Patrick Torralba"
+author: "Patrick Torralba"
+format: 
+  html:
+    theme: flatly
+    fontsize: 0.8em
+    code-fold: FALSE
+    code-tools: TRUE
+    code-copy: TRUE
+    toc: TRUE
+    toc-depth: 4
+    smooth-scroll: TRUE
+    embed-resources: TRUE
+    fig-align: center
+editor: visual
+---
+
+# Library
+
+```{r}
+#| label: library
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE 
+
+library(tidyverse) #clean data
+
+```
+
+# Load Data
+
+```{r}
+#| label: load-data
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+birth <- read_csv("births14.csv")
+
+```
+
+# Step 1
+
+```{r}
+#| label: complete-cases
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+birth <- birth |> 
+  mutate(lowbirthweight = as.factor(lowbirthweight)) |> 
+  drop_na()
+
+```
+
+# Step 2
+
+```{r}
+#| label: decision-tree
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+library(rpart)
+
+dec_tree <- rpart(lowbirthweight ~ . -weight,
+                  data = birth)
+
+```
+
+```{r}
+#| label: AUC
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+library(rpart.plot)
+library(pROC)
+
+tree_preds <- as_vector(predict(dec_tree, type = "prob")[,2])
+
+auc <-  roc(birth$lowbirthweight, tree_preds)$auc
+
+auc
+
+```
+
+# Step 3
+
+```{r}
+#| label: training-test-sets
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+addTrainTest <- function(dat, prop_train = 0.7, prop_test = 1 - prop_train) {
+  train_ind <- sample(1:nrow(dat), prop_train*nrow(dat), replace = FALSE)
+  test_ind <- setdiff(1:nrow(dat), train_ind)
+  dat %>% mutate(train = as.integer(1:nrow(dat) %in% train_ind),
+                 test = as.integer(1:nrow(dat) %in% test_ind))
+}
+
+```
+
+```{r}
+#| label: births-train-test
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+
+births_train <- birth |> 
+  addTrainTest() |> 
+  filter(train == 1)
+
+
+births_test <- birth |> 
+  addTrainTest() |> 
+  filter(test == 1)
+
+```
+
+# Step 4
+
+```{r}
+#| label: decision-tree-births-train
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+dec_tree_birth_train <- rpart(lowbirthweight ~ . -weight,
+                  data = births_train)
+
+tree_preds_birth_train <- as_vector(predict(dec_tree, type = "prob", newdata = births_train)[,2])
+
+
+tree_preds_birth_test <- as_vector(predict(dec_tree, type = "prob", newdata = births_test)[,2])
+
+auc_birth_train <- roc(births_test$lowbirthweight, tree_preds_birth_train)
+
+auc_birth_test <- roc(births_test$lowbirthweight, tree_preds_birth_test)
+
+```
+
+# Step 5
+
+```{r}
+#| label: cross-validation-estimate
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+addFolds <- function(dat, n_folds = 5) { # Insert Ben Folds 5 joke here
+  fold_size <- ceiling(nrow(dat) / n_folds)
+  fold_vals <- rep(1:n_folds, fold_size)[1:nrow(dat)]
+  
+  dat %>%
+    slice(sample.int(nrow(dat))) %>%
+    mutate(fold = fold_vals)
+}
+## Define a function which calculates the statistic you want, in this case AUC
+calcAUC <- function(dat_train, dat_test) {
+  tree <- rpart(lowbirthweight ~ . - weight, data = dat_train)
+  preds_test <- as.vector(predict(tree, type = "prob", newdata = dat_test)[, 2])
+
+  auc <- roc(dat_test$lowbirthweight, preds_test)$auc
+  return(auc)
+}
+
+library(purrr)
+
+## Add the fold indicators to prepare for cross-validation
+births_cv <- birth %>% addFolds()
+
+AUCs <- vector()
+for(fld in 1:5) {
+  ## Creating the CV training and test data
+  births_cv_train <- births_cv %>% filter(fold != fld)
+  births_cv_test <- births_cv %>% filter(fold == fld)
+  
+  ## Feed the data into the calcAUC function
+  AUCs[fld] <- calcAUC(births_cv_train, births_cv_test)
+}
+
+## Display the test AUCs across all folds
+AUCs
+
+## Calculate the mean of the test AUCs
+mean_auc <- mean(AUCs)
+mean_auc
+
+```
