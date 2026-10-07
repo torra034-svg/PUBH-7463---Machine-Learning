@@ -14,10 +14,10 @@ format:
     embed-resources: TRUE
     fig-align: center
 editor: visual
-
 ---
 
 # Preliminary
+
 ```{r}
 #| label: library
 #| message: FALSE
@@ -26,6 +26,7 @@ editor: visual
 
 library(tidyverse) #clean data
 library(tidymodels)
+library(kableExtra) ## create nice data tables
 
 atus <- read_csv("atus.csv")
 ```
@@ -55,4 +56,393 @@ atus_test <- testing(atus_split)
 ```
 
 # Question 1
-I am using the following covariates to 
+
+## Define the specs
+
+```{r}
+#| label: specs
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+lin_reg <- linear_reg() |> 
+  set_engine("glm") |> 
+  set_mode("regression")
+```
+
+## Get all BLS variables
+```{r}
+#| label: BLS
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE
+
+BLS <- atus |> 
+  select(starts_with("BLS")) |> 
+  select(1:11)
+
+BLS
+
+```
+
+
+## Define the model
+
+```{r}
+#| label: model
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+lin_reg_model <- lin_reg |> 
+  fit(SCHAPPY ~ BLS_CAREHH +  BLS_CAREHH_ADULT + BLS_CAREHH_KID + BLS_CAREHH_KIDEDUC + BLS_CAREHH_KIDHEALTH + BLS_CAREHH_KIDOTHER + BLS_CAREHH_TRAVEL + BLS_CARENHH + BLS_CARENHH_ADULT + BLS_CARENHH_ADULTHELP,
+      data = atus_train)
+
+```
+
+
+## Predict Probability
+
+```{r}
+#| label: predict
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+predict_lin_reg_model <- predict(lin_reg_model, new_data = atus_test) 
+
+## Note to self: only include type = "prob" for classification models
+
+```
+
+## Bind Predictions
+
+```{r}
+#| label: bind-predictions
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE 
+
+atus_pred <- atus_test |> 
+  bind_cols(predict_lin_reg_model)
+
+```
+
+## Compare Actual vs Predicted SCHAPPY Values
+
+```{r}
+#| label: compare-viz-happy
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+ggplot(atus_pred, aes(x = SCHAPPY, y = .pred)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  labs(
+    x = "Observed SCHAPPY",
+    y = "Predicted SCHAPPY",
+    title = "Observed vs Predicted Happiness")
+
+```
+
+## SCHAPPY Table
+
+```{r}
+#| label: SCHAPPY-table
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+happy_table <- atus_pred |> 
+  select(CASEID,BLS_CAREHH, BLS_CAREHH_ADULT,BLS_CAREHH_KID,BLS_CAREHH_KIDEDUC,BLS_CAREHH_KIDHEALTH,BLS_CAREHH_KIDOTHER,BLS_CAREHH_TRAVEL,BLS_CARENHH,BLS_CARENHH_ADULT,BLS_CARENHH_ADULTCARE, BLS_CARENHH_ADULTHELP, SCHAPPY, .pred)
+
+kable(happy_table)
+```
+
+## SCHAPPY Coefficients
+
+```{r}
+#| label: happy-coefficients
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+coefficients <- lin_reg_model |>
+  tidy() |>
+  filter(term != "(Intercept)") |>
+  mutate(absolute_magnitude = abs(estimate)) |>
+  arrange(desc(absolute_magnitude)) |>
+  slice_head(n = 10) |>
+  select(term, estimate, absolute_magnitude)
+
+
+kable(coefficients)
+```
+
+# Question 2
+
+## Define LASSO spec
+
+```{r}
+#| label: lasso-spec
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+lasso_spec <- 
+  linear_reg(penalty = tune(), mixture = 1) |> 
+  set_engine("glmnet")
+```
+
+## Locate Best Lambda Value by doing Cross-Validation
+
+```{r}
+#| label: locate-lambda-best-value
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+## Define folds
+folds <- vfold_cv(atus_train, v = 5)
+
+
+
+## Evaluate different values of lambda
+lasso_results <- tune_grid(
+  lasso_spec,
+  SCHAPPY ~ BLS_CAREHH +  BLS_CAREHH_ADULT + BLS_CAREHH_KID + BLS_CAREHH_KIDEDUC + BLS_CAREHH_KIDHEALTH + BLS_CAREHH_KIDOTHER + BLS_CAREHH_TRAVEL + BLS_CARENHH + BLS_CARENHH_ADULT + BLS_CARENHH_ADULTHELP,
+  resamples = folds
+)
+
+## Find optimal lambda value. This will be the value with the lowest RMSE value.
+best_lambda <- select_best(lasso_results, metric = "rmse")
+
+best_lambda_value <- pull(best_lambda, penalty)
+
+```
+
+**The best lambda value is 0.043 because this has the least root mean squared error value. Meaning that when utilized in a model, it is as close as we can get to the observed values.**
+
+## Define LASSO model
+
+```{r}
+#| label: lasso-model
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+lasso_spec <- 
+  linear_reg(penalty = best_lambda_value, mixture = 1) |> 
+  set_engine("glmnet")
+
+lasso_model <- lasso_spec |> 
+  fit(SCHAPPY ~ BLS_CAREHH +  BLS_CAREHH_ADULT + BLS_CAREHH_KID + BLS_CAREHH_KIDEDUC + BLS_CAREHH_KIDHEALTH + BLS_CAREHH_KIDOTHER + BLS_CAREHH_TRAVEL + BLS_CARENHH + BLS_CARENHH_ADULT + BLS_CARENHH_ADULTHELP,
+  data = atus_train)
+
+```
+
+## Predict LASSO Values
+
+```{r}
+#| label: predict-lasso
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+predict_lasso_model <- predict(lasso_model, new_data = atus_test) 
+
+## Note to self: only include type = "prob" for classification models
+
+```
+
+## Bind LASSO Predictions
+
+```{r}
+#| label: bind-predictions-lasso
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE 
+
+lasso_atus_pred <- atus_test |> 
+  bind_cols(predict_lasso_model)
+
+```
+
+## Compare Actual vs Predicted LASSO SCHAPPY Values
+
+```{r}
+#| label: compare-viz-happy-lasso
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+ggplot(lasso_atus_pred, aes(x = SCHAPPY, y = .pred)) +
+  geom_point() +
+  labs(
+    x = "Observed SCHAPPY",
+    y = "Predicted SCHAPPY",
+       title = "Observed vs LASSO Predicted Happiness")
+
+```
+
+## LASSO SCHAPPY Coefficients
+
+```{r}
+#| label: happy-coefficients-lasso
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+lasso_coefficients <- lasso_model |>
+  tidy() |>
+  filter(term != "(Intercept)", estimate != 0) |>
+  mutate(absolute_magnitude = abs(estimate)) |>
+  arrange(desc(absolute_magnitude)) |>
+  select(term, estimate)
+
+
+kable(lasso_coefficients)
+```
+
+# Question 3
+
+## Compare Coefficients from Linear Regression to Lasso Model
+
+```{r}
+#| label: compare-lin-reg-lasso
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+
+coefficients_comparison <- full_join(coefficients, lasso_coefficients, by = "term") |> 
+  rename(linear_regression_estimate = estimate.x,
+         lasso_estimate = estimate.y)
+
+kable(coefficients_comparison)
+
+```
+
+## Calculate and Compare Mean-Squared Errors (MSE)
+
+```{r}
+#| label: mse-calculation
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+lin_reg_mse <- atus_pred |> 
+  summarize(
+    MSE = mean((SCHAPPY - .pred)^2)
+  )
+
+lin_reg_mse
+
+lasso_mse <- lasso_atus_pred |> 
+  summarise(
+    MSE = mean((SCHAPPY - .pred)^2)
+  )
+
+lasso_mse
+
+```
+
+It looks like the mean-squared errors of both the linear regression and lasso model are very similar based on the displayed output. Therefore, both models have a very similar predictive performance. However, the linear regression model is slightly better based on it's lower RMSE value as depicted in Question 4 below. Also, in terms of mean-squared errors, these differences are unlikely to be scientifically relevant due to their highly identical output. For example, lasso MSE could be 1.44 and linear regression MSE could be 1.435, but due to rounding the output would appear as the same value.
+
+# Question 4
+
+## Define two-stage linear regression model
+
+```{r}
+#| label: two-stage-lasso
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+lin_reg_model_v2 <- lin_reg |> 
+  fit(SCHAPPY ~ BLS_CAREHH_KIDEDUC,
+      data = atus_train)
+
+```
+
+## Predictions
+
+```{r}
+#| label: two-stage-predictions
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+two_stage_pred <- predict(lin_reg_model_v2, new_data = atus_test)
+
+```
+
+## Bind Predictions to atus_test
+
+```{r}
+#| label: two-stage-atus-pred
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+two_stage_atus_pred <- bind_cols(atus_test, two_stage_pred)
+
+```
+
+## Calculate RMSE for two-stage-model
+
+```{r}
+#| label: rmse-two-stage
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+two_stage_rmse <- two_stage_atus_pred |> 
+  metrics(
+    truth = SCHAPPY,
+    estimate = .pred
+  ) |> 
+  filter(.metric == "rmse") |> 
+  mutate(model = "two_stage")
+
+
+two_stage_rmse 
+
+```
+
+## Compare RMSE with all models
+
+```{r}
+#| label: rmse-model-compare
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+
+lasso_model_rmse <-  lasso_atus_pred |> 
+    metrics(
+    truth = SCHAPPY,
+    estimate = .pred
+  ) |> 
+  filter(.metric == "rmse") |> 
+    mutate(model = "lasso")
+
+
+lin_reg_model_rmse <- atus_pred |> 
+      metrics(
+    truth = SCHAPPY,
+    estimate = .pred
+  ) |> 
+  filter(.metric == "rmse") |> 
+    mutate(model = "linear_regression")
+
+
+
+models_rmse_compare <- bind_rows(lin_reg_model_rmse, lasso_model_rmse, two_stage_rmse)
+
+kable(models_rmse_compare)
+
+```
+
+Since the previous lasso model identified only BLS_CAREHH_KIDEDUC as a non-zero covariate predictor, said predictor was reused when creating the two-stage model. When comparing RMSE values between each model, it appears that all models have the exact same RMSE value, 1.20, after rounding to two decimal places. However, when not rounding, the two-stage model has the lowest RMSE, followed by the linear regression model, and lastly, the lasso model. Therefore, all three models have identical prediction performance with the exception of the two-stage model that performs slightly better due to it's lower RMSE value

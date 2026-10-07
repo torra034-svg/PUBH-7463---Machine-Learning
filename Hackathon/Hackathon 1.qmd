@@ -1,0 +1,173 @@
+---
+title: "Lasso - Patrick Torralba"
+author: "Patrick Torralba"
+format: 
+  html:
+    theme: flatly
+    fontsize: 0.8em
+    code-fold: FALSE
+    code-tools: TRUE
+    code-copy: TRUE
+    toc: TRUE
+    toc-depth: 4
+    smooth-scroll: TRUE
+    embed-resources: TRUE
+    fig-align: center
+editor: visual
+---
+
+# Library
+
+```{r}
+#| label: library
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+library(tidyverse)
+library(tidymodels)
+library(broom)
+library(kableExtra)
+
+```
+
+# Import Data
+
+```{r} 
+#| label: import
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+flu_train <- read_csv("nhis_flu_train_21_22.csv") |> 
+  mutate(
+    SHTFLU12M_A = as.factor(case_when(
+      str_detect(SHTFLU12M_A, "Yes") ~ 1,
+      str_detect(SHTFLU12M_A, "No") ~ 0
+    ))) |> 
+  slice_sample(n = 10000) |>  
+  select(-HHX, -SRVY_YR)
+
+flu_test <- read_csv("nhis_flu_test_23.csv")
+
+flu_predict <- read_csv("nhis_flu_predict_23.csv")
+
+set.seed(123)
+```
+
+Note to self: The outcome variable is SHTFLU12M_A and is a binary outcome if the person had a flu vaccine in the past 12 months.
+
+Ideas \* Use LASSO to determine predictors \*
+
+# Step 1
+
+## Define LASSO spec
+
+```{r}
+#| label: lasso-specs
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+lasso_spec <-
+  logistic_reg(penalty = tune(), mixture = 1) |> 
+  set_engine("glmnet")
+
+```
+
+## Locate Best Lambda value via Cross-Validation
+
+```{r}
+#| label: define-folds
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+## Define folds
+folds <- vfold_cv(flu_train, v = 5)
+```
+
+
+## Create preprocessing recipe to remove unknowns, novel, and dummy
+
+```{r}
+#| label: preprocessing
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+lasso_recipe <- recipe(SHTFLU12M_A ~ ., data = flu_train) |>
+  step_unknown(all_nominal_predictors()) |>
+  step_novel(all_nominal_predictors()) |>
+  step_dummy(all_nominal_predictors()) |>
+  step_zv(all_predictors())
+```
+
+
+## Create LASSO workflow
+
+```{r}
+#| label: lasso-workflow
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+## Create LASSO workflow
+lasso_workflow <- workflow() |>
+  add_recipe(lasso_recipe) |>
+  add_model(lasso_spec)
+
+```
+
+
+```{r}
+#| label: eval-lambda-values
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+
+## Evaluate different values of lambda
+lasso_results <- tune_grid(
+  lasso_workflow,
+  resamples = folds,
+  metrics = metric_set(roc_auc)
+)
+
+
+## Find optimal lambda value. This will be the value with the highest ROC AUC value.
+best_lambda <- select_best(lasso_results, metric = "roc_auc")
+
+best_lambda_value <- pull(best_lambda, penalty)
+
+```
+
+## Finalize LASSO model
+
+```{r}
+#| label: finalize-lasso-model
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+lasso_model <- finalize_workflow(
+  lasso_workflow,
+  best_lambda
+) |> 
+  fit(data = flu_train)
+```
+
+# Step 2
+
+## Predict LASSO values
+```{r}
+#| label: predict
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+flu_pred <- flu_test |> 
+  mutate(.pred = predict(lasso_model, new_data = flu_test))
+
+```
+
