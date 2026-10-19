@@ -1,0 +1,177 @@
+---
+title: "Activity 5 - Patrick Torralba"
+author: "Patrick Torralba"
+format: 
+  html:
+    theme: flatly
+    fontsize: 0.8em
+    code-fold: FALSE
+    code-tools: TRUE
+    code-copy: TRUE
+    toc: TRUE
+    toc-depth: 4
+    smooth-scroll: TRUE
+    embed-resources: TRUE
+    fig-align: center
+editor: visual
+---
+
+# Library
+
+```{r}
+#| label: library
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+library(tidyverse)
+library(tidymodels)
+library(broom)
+library(kableExtra)
+
+```
+
+# Step 1
+```{r}
+#| label: import
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+nhis <- read_csv("nhis_flu_train_21_22.csv") |> 
+  select(-c(HHX, SRVY_YR, AFNOW, PREGNOW_A, CVDDIAG_A, SHTFLU12M_A)) %>%
+  filter(PHSTAT_A != "Unknown") %>%
+  mutate(across(-c(AGEP_A, PCNT18UPTC, PCNTLT18TC), as.factor),
+         HEALTH = factor(PHSTAT_A, 
+                         levels = c("Poor", "Fair", "Good", "Very Good", "Excellent")) %>% as.integer) %>%
+  select(-PHSTAT_A) %>%
+  drop_na()
+
+nhis_test <- read_csv("nhis_flu_predict_23.csv") |> 
+  select(-c(HHX, SRVY_YR, AFNOW, PREGNOW_A, CVDDIAG_A)) %>%
+  filter(PHSTAT_A != "Unknown") %>%
+  mutate(across(-c(AGEP_A, PCNT18UPTC, PCNTLT18TC), as.factor),
+         HEALTH = factor(PHSTAT_A, 
+                         levels = c("Poor", "Fair", "Good", "Very Good", "Excellent")) %>% as.integer) %>%
+  select(-PHSTAT_A) %>%
+  drop_na()
+
+
+```
+
+
+# Step 2
+```{r}
+#| label: decision-tree
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+library(rpart)
+library(rpart.plot)
+
+dt_model <- rpart(
+  HEALTH ~ .,
+  data = nhis
+)
+
+
+rpart.plot(dt_model)
+
+```
+
+
+# Step 3
+```{r}
+#| label: conditional-inference-tree
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+library(partykit)
+
+CIT_model <- ctree(
+  HEALTH ~ .,
+  control = ctree_control(maxdepth = 3),
+  data = nhis
+)
+
+plot(CIT_model)
+
+```
+
+```{r}
+#| label: CIT-predictions
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+CIT_pred <- predict(CIT_model, newdata = nhis_test)
+
+```
+
+```{r}
+#| label: CIT-RMSE
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+nhis_test_rmse <- nhis_test |> 
+  mutate(HEALTH_CIT_pred = CIT_pred) |> 
+  summarize(RMSE = sqrt(mean(HEALTH- HEALTH_CIT_pred)))
+
+```
+
+# Step 4
+```{r}
+#| label: KNN
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE
+
+library(caret)
+
+KNN <- knnreg(HEALTH ~ ., data = nhis)
+nhis_small_test <- nhis_test %>% slice_sample(n = 1000)
+preds_knn <- predict(KNN, newdata = nhis_small_test)
+
+evalRMSE <- function(preds, test_data = nhis_test) {
+  test_data %>% mutate(HEALTH_preds = preds) %>%
+    summarize(RMSE = sqrt(mean((HEALTH - HEALTH_preds)^2)))  
+}
+
+evalRMSE(preds_knn, nhis_small_test)
+
+```
+
+# Step 5
+```{r}
+#| label: gam
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+library(gam)
+
+GAM <- gam(HEALTH ~ s(AGEP_A), data = nhis)
+preds_GAM <- predict(GAM, newdata = nhis_test)
+
+evalRMSE(preds_GAM)
+
+```
+
+
+```{r}
+#| label: gam-plot
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+nhis_test %>% select(AGEP_A, HEALTH) %>%
+  mutate(preds_GAM = preds_GAM) %>%
+  ggplot() +
+  geom_point(aes(x = jitter(AGEP_A), y = jitter(HEALTH)), alpha = 0.1) +
+  geom_smooth(aes(x = AGEP_A, y = preds_GAM))
+
+```
+

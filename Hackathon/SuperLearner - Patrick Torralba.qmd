@@ -1,0 +1,222 @@
+---
+title: "SuperLearner - Patrick Torralba"
+author: "Patrick Torralba"
+format: 
+  html:
+    theme: flatly
+    fontsize: 0.8em
+    code-fold: FALSE
+    code-tools: TRUE
+    code-copy: TRUE
+    toc: TRUE
+    toc-depth: 4
+    smooth-scroll: TRUE
+    embed-resources: TRUE
+    fig-align: center
+editor: visual
+---
+
+# Library
+
+```{r}
+#| label: library
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+library(tidyverse)
+library(tidymodels)
+library(broom)
+library(kableExtra)
+
+```
+
+# Step 1
+```{r}
+#| label: import data
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+nhis_train <- read_csv("nhis_flu_train_21_22.csv") |> 
+  select(-c(HHX, SRVY_YR, AFNOW, PREGNOW_A, CVDDIAG_A)) %>%
+  mutate(across(-c(AGEP_A, PCNT18UPTC, PCNTLT18TC), as.factor)) %>%
+  drop_na()
+
+nhis_test <- read_csv("nhis_flu_test_23.csv") |> 
+  select(-c(HHX, SRVY_YR, AFNOW, PREGNOW_A, CVDDIAG_A)) %>%
+  mutate(across(-c(AGEP_A, PCNT18UPTC, PCNTLT18TC), as.factor)) %>%
+  drop_na()
+
+```
+
+# Step 2: Using Random Forest
+```{r}
+#| label: ranger
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+library(ranger)
+
+
+RF <- ranger(SHTFLU12M_A ~ ., data = nhis_train, probability = TRUE, importance = "impurity")
+
+```
+
+```{r}
+#| label: AUC
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+library(pROC)
+pred_RF <- predict(RF, data = nhis_test)
+
+preds_RF <- data.frame(
+  true = nhis_test %>% pull(SHTFLU12M_A),
+  pred = pred_RF$predictions[,2]
+)
+
+ROC <- roc(preds_RF %>% pull(true),
+           preds_RF %>% pull(pred))
+
+ROC$auc
+```
+
+#Step 3: SuperLearner set-up
+```{r}
+#| label: SL-set-up
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+library(SuperLearner)
+
+Y_train <- nhis_train %>% 
+  mutate(SHTFLU12M_A = as.integer(SHTFLU12M_A)-1) %>%
+  pull(SHTFLU12M_A)
+
+X_train <- model.matrix(SHTFLU12M_A ~ ., data = nhis_train)[, -1] %>% data.frame()
+X_test <- model.matrix(SHTFLU12M_A ~ ., data = nhis_test)[, -1] %>% data.frame()
+
+```
+
+```{r}
+#| label: wrappers
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+listWrappers("SL")
+```
+
+```{r}
+#| label: define-SL-algorithims
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+SL_algorithms <- list("SL.ranger", "SL.glm", "SL.gam")
+```
+
+# Step 4: Fit SuperLearner Model
+```{r}
+#| label: fit
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+
+SL <- SuperLearner(Y_train, X_train, 
+                   newX = X_test,
+                   family = "binomial",
+                   SL.library = SL_algorithms,
+                   cvControl = SuperLearner.CV.control(V=3))
+
+```
+
+# Step 5: Exploring the Results
+```{r}
+#| label: prediction
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+preds_df <- data.frame(
+  true = nhis_test %>% pull(SHTFLU12M_A),
+  pred = SL$SL.predict
+)
+
+preds_df %>%
+  ggplot(aes(x = pred, fill = true)) +
+  geom_histogram(position = "dodge")
+
+```
+
+```{r}
+#| label: prediction-by-model
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+preds_sl_df <- SL$library.predict %>% as_tibble() %>%
+  pivot_longer(everything(), 
+               names_to = "model", values_to = "pred") %>% 
+  mutate(true = rep(nhis_test %>% pull(SHTFLU12M_A), each = length(SL_algorithms)))
+
+preds_sl_df %>%
+  ggplot(aes(x = pred, fill = true)) +
+  geom_density(alpha = 0.4) +
+  facet_wrap(~model)
+```
+
+```{r}
+#| label: SL-breakdown
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+SL$coef
+SL$cvRisk
+```
+
+
+```{r}
+#| label: SL-auc
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+
+library(pROC)
+
+pred_wide <- SL$library.predict %>% as_tibble() %>%
+  mutate(SHTFLU12M_A = nhis_test %>% pull(SHTFLU12M_A))
+
+ROC_all <- roc(SHTFLU12M_A ~ SL.ranger_All + SL.glm_All + SL.gam_All,
+               data = pred_wide)
+map_dfr(ROC_all, function(x) x$auc)
+```
+
+```{r}
+#| label: auc-SL-overall
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+ROC <- roc(preds_df %>% pull(true),
+           preds_df %>% pull(pred))
+
+ROC$auc
+```
+
+```{r}
+#| label: SL-CI
+#| message: FALSE
+#| warning: FALSE
+#| echo: TRUE  
+
+ci.auc(ROC)
+```
+
